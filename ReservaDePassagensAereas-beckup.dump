@@ -1,0 +1,659 @@
+--
+-- PostgreSQL database dump
+--
+
+-- Dumped from database version 10.10
+-- Dumped by pg_dump version 10.10
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: plpgsql; Type: EXTENSION; Schema: -; Owner: 
+--
+
+CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;
+
+
+--
+-- Name: EXTENSION plpgsql; Type: COMMENT; Schema: -; Owner: 
+--
+
+COMMENT ON EXTENSION plpgsql IS 'PL/pgSQL procedural language';
+
+
+--
+-- Name: class; Type: TYPE; Schema: public; Owner: postgres
+--
+
+CREATE TYPE public.class AS ENUM (
+    'economica',
+    'executiva',
+    'primeiraClasse'
+);
+
+
+ALTER TYPE public.class OWNER TO postgres;
+
+--
+-- Name: poltronainexiste(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.poltronainexiste() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+	BEGIN
+		if NEW.assento > (select poltronaseconomica from aviao where id = (select aviao from trechovoo where id = NEW.trechovoo)) + (select poltronasexecutiva from aviao where id = (select aviao from trechovoo where id = NEW.trechovoo)) + (select poltronaspc from aviao where id = (select aviao from trechovoo where id = NEW.trechovoo)) THEN
+			RAISE EXCEPTION 'poltrona inexistente';
+		END IF;
+		RETURN NEW;
+	END;
+$$;
+
+
+ALTER FUNCTION public.poltronainexiste() OWNER TO postgres;
+
+--
+-- Name: reservar(text, integer, integer, date); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.reservar(nome text, origem integer, destino integer, dia date, OUT texto text, OUT id integer) RETURNS record
+    LANGUAGE plpgsql
+    AS $$
+begin
+
+if (0=(select count(*) from trechovoo where origem = trechovoo.aeroportoorigem)) THEN
+	texto = 'aeroporto de origem indisponivel';
+	id = 0;
+end if;
+if (0=(select count(*) from trechovoo where destino = trechovoo.aeroportodestino)) THEN
+	texto = 'aeroporto de destino indisponivel';
+	id = 0;
+end if;
+
+insert into reservas(passageiro, data_reserva, data_reservada) values(nome, (select CURRENT_DATE), dia);
+texto = 'reserva efetuada';
+id = MAX(reservas.id) from reservas;
+end;
+$$;
+
+
+ALTER FUNCTION public.reservar(nome text, origem integer, destino integer, dia date, OUT texto text, OUT id integer) OWNER TO postgres;
+
+--
+-- Name: reservar_trecho(integer, integer, integer); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.reservar_trecho(ident integer, trecho integer, poltrona integer, OUT texto text) RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+if 0 < count(*) from trechoreserva where trechoreserva.assento = poltrona and data_viagem = (select data_reservada from reservas where id = ident) THEN
+	texto = 'poltrona ocupada';
+	
+elsif poltrona > (select poltronaseconomica from aviao where id = (select aviao from trechovoo where id = trecho)) + (select poltronasexecutiva from aviao where id = (select aviao from trechovoo where id = trecho)) + (select poltronaspc from aviao where id = (select aviao from trechovoo where id = trecho)) THEN
+	texto = 'poltrona inexiste';
+elsif 1=1 THEN
+	insert into trechoreserva(reserva, trechovoo, assento, data_viagem) values(ident, trecho, poltrona, (select data_reservada from reservas where id = ident));
+	if poltrona <= (select poltronaspc from aviao where id = (select aviao from trechovoo where id = trecho)) THEN
+		texto = 'reserva de trecho efetuada na primeira classe';
+	elsif poltrona <= (select poltronasexecutiva from aviao where id = (select aviao from trechovoo where id = trecho)) THEN
+		texto = 'reserva de trecho efetuada na classe executiva';
+	else
+		texto = 'reserva de trecho efetuada na classe economica';
+	END IF;
+END IF;
+END;
+
+$$;
+
+
+ALTER FUNCTION public.reservar_trecho(ident integer, trecho integer, poltrona integer, OUT texto text) OWNER TO postgres;
+
+--
+-- Name: foreign; Type: FOREIGN DATA WRAPPER; Schema: -; Owner: postgres
+--
+
+CREATE FOREIGN DATA WRAPPER "foreign";
+
+
+ALTER FOREIGN DATA WRAPPER "foreign" OWNER TO postgres;
+
+SET default_tablespace = '';
+
+SET default_with_oids = false;
+
+--
+-- Name: aeroportos; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.aeroportos (
+    id integer NOT NULL,
+    cidade text NOT NULL,
+    nome text NOT NULL
+);
+
+
+ALTER TABLE public.aeroportos OWNER TO postgres;
+
+--
+-- Name: aeroportos_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.aeroportos_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.aeroportos_id_seq OWNER TO postgres;
+
+--
+-- Name: aeroportos_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.aeroportos_id_seq OWNED BY public.aeroportos.id;
+
+
+--
+-- Name: aviao; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.aviao (
+    id integer NOT NULL,
+    poltronaseconomica integer NOT NULL,
+    poltronasexecutiva integer NOT NULL,
+    poltronaspc integer NOT NULL,
+    CONSTRAINT aviao_poltronaseconomica_check CHECK ((poltronaseconomica >= 0)),
+    CONSTRAINT aviao_poltronasexecutiva_check CHECK ((poltronasexecutiva >= 0)),
+    CONSTRAINT aviao_poltronaspc_check CHECK ((poltronaspc >= 0))
+);
+
+
+ALTER TABLE public.aviao OWNER TO postgres;
+
+--
+-- Name: aviao_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.aviao_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.aviao_id_seq OWNER TO postgres;
+
+--
+-- Name: aviao_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.aviao_id_seq OWNED BY public.aviao.id;
+
+
+--
+-- Name: reservas; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.reservas (
+    id integer NOT NULL,
+    passageiro text NOT NULL,
+    data_reserva date,
+    data_reservada date
+);
+
+
+ALTER TABLE public.reservas OWNER TO postgres;
+
+--
+-- Name: reservas_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.reservas_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.reservas_id_seq OWNER TO postgres;
+
+--
+-- Name: reservas_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.reservas_id_seq OWNED BY public.reservas.id;
+
+
+--
+-- Name: trechoreserva; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.trechoreserva (
+    id integer NOT NULL,
+    reserva integer NOT NULL,
+    trechovoo integer NOT NULL,
+    assento integer NOT NULL,
+    data_viagem date
+);
+
+
+ALTER TABLE public.trechoreserva OWNER TO postgres;
+
+--
+-- Name: trechoreserva_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.trechoreserva_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.trechoreserva_id_seq OWNER TO postgres;
+
+--
+-- Name: trechoreserva_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.trechoreserva_id_seq OWNED BY public.trechoreserva.id;
+
+
+--
+-- Name: trechovoo; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.trechovoo (
+    id integer NOT NULL,
+    voo integer NOT NULL,
+    aviao integer NOT NULL,
+    aeroportoorigem integer NOT NULL,
+    aeroportodestino integer NOT NULL
+);
+
+
+ALTER TABLE public.trechovoo OWNER TO postgres;
+
+--
+-- Name: trechos_view; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.trechos_view AS
+ SELECT trechovoo.id AS trecho,
+    trechovoo.aeroportoorigem,
+    aeroportos.nome AS origem,
+    trechovoo.aeroportodestino,
+    aero.nome AS destino
+   FROM ((public.trechovoo
+     JOIN public.aeroportos ON ((trechovoo.aeroportoorigem = aeroportos.id)))
+     JOIN public.aeroportos aero ON ((trechovoo.aeroportodestino = aero.id)));
+
+
+ALTER TABLE public.trechos_view OWNER TO postgres;
+
+--
+-- Name: trechovoo_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.trechovoo_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.trechovoo_id_seq OWNER TO postgres;
+
+--
+-- Name: trechovoo_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.trechovoo_id_seq OWNED BY public.trechovoo.id;
+
+
+--
+-- Name: viagem_view; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.viagem_view AS
+ SELECT reservas.passageiro,
+    trechoreserva.trechovoo,
+    trechoreserva.assento,
+    trechovoo.voo,
+    trechovoo.aviao,
+    trechovoo.aeroportoorigem,
+    aeroportos.nome AS origem,
+    trechovoo.aeroportodestino,
+    aero.nome AS destino
+   FROM ((((public.reservas
+     JOIN public.trechoreserva ON ((trechoreserva.reserva = reservas.id)))
+     JOIN public.trechovoo ON ((trechoreserva.trechovoo = trechovoo.id)))
+     JOIN public.aeroportos ON ((trechovoo.aeroportoorigem = aeroportos.id)))
+     JOIN public.aeroportos aero ON ((trechovoo.aeroportodestino = aero.id)));
+
+
+ALTER TABLE public.viagem_view OWNER TO postgres;
+
+--
+-- Name: voo; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.voo (
+    id integer NOT NULL
+);
+
+
+ALTER TABLE public.voo OWNER TO postgres;
+
+--
+-- Name: voo_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.voo_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.voo_id_seq OWNER TO postgres;
+
+--
+-- Name: voo_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.voo_id_seq OWNED BY public.voo.id;
+
+
+--
+-- Name: aeroportos id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.aeroportos ALTER COLUMN id SET DEFAULT nextval('public.aeroportos_id_seq'::regclass);
+
+
+--
+-- Name: aviao id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.aviao ALTER COLUMN id SET DEFAULT nextval('public.aviao_id_seq'::regclass);
+
+
+--
+-- Name: reservas id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.reservas ALTER COLUMN id SET DEFAULT nextval('public.reservas_id_seq'::regclass);
+
+
+--
+-- Name: trechoreserva id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.trechoreserva ALTER COLUMN id SET DEFAULT nextval('public.trechoreserva_id_seq'::regclass);
+
+
+--
+-- Name: trechovoo id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.trechovoo ALTER COLUMN id SET DEFAULT nextval('public.trechovoo_id_seq'::regclass);
+
+
+--
+-- Name: voo id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.voo ALTER COLUMN id SET DEFAULT nextval('public.voo_id_seq'::regclass);
+
+
+--
+-- Data for Name: aeroportos; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY public.aeroportos (id, cidade, nome) FROM stdin;
+1	Sao Paulo	Congonhas
+2	Sao Paulo	Viracopos
+3	Sao Paulo	Cumbica
+4	Brasilia	Aeroporto Internacional de Brasilia
+5	Rio de Janeiro	Aeroporto Internacional do Galeao
+6	Rio de Janeiro	Santos Dumont
+7	Cuiaba	Aeroporto Internacional de Cuiaba
+8	Sorriso	Aeroporto de Sorriso
+\.
+
+
+--
+-- Data for Name: aviao; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY public.aviao (id, poltronaseconomica, poltronasexecutiva, poltronaspc) FROM stdin;
+1	50	40	30
+2	50	40	30
+3	60	40	25
+4	60	40	25
+\.
+
+
+--
+-- Data for Name: reservas; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY public.reservas (id, passageiro, data_reserva, data_reservada) FROM stdin;
+1	Marcos Antonio	2019-10-18	2019-11-18
+2	Marcia Belfort	2019-10-05	2019-11-17
+4	tati	2019-10-19	2019-12-12
+\.
+
+
+--
+-- Data for Name: trechoreserva; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY public.trechoreserva (id, reserva, trechovoo, assento, data_viagem) FROM stdin;
+4	1	1	10	\N
+5	1	3	11	\N
+6	2	6	40	\N
+7	2	2	35	\N
+8	1	4	20	2019-11-18
+\.
+
+
+--
+-- Data for Name: trechovoo; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY public.trechovoo (id, voo, aviao, aeroportoorigem, aeroportodestino) FROM stdin;
+1	1	1	8	7
+2	1	1	7	8
+3	2	2	7	1
+4	2	2	1	2
+5	2	2	2	3
+6	2	2	3	7
+\.
+
+
+--
+-- Data for Name: voo; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY public.voo (id) FROM stdin;
+1
+2
+3
+4
+\.
+
+
+--
+-- Name: aeroportos_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('public.aeroportos_id_seq', 8, true);
+
+
+--
+-- Name: aviao_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('public.aviao_id_seq', 4, true);
+
+
+--
+-- Name: reservas_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('public.reservas_id_seq', 4, true);
+
+
+--
+-- Name: trechoreserva_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('public.trechoreserva_id_seq', 8, true);
+
+
+--
+-- Name: trechovoo_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('public.trechovoo_id_seq', 6, true);
+
+
+--
+-- Name: voo_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
+--
+
+SELECT pg_catalog.setval('public.voo_id_seq', 1, false);
+
+
+--
+-- Name: aeroportos aeroportos_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.aeroportos
+    ADD CONSTRAINT aeroportos_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: aviao aviao_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.aviao
+    ADD CONSTRAINT aviao_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: reservas reservas_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.reservas
+    ADD CONSTRAINT reservas_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: trechoreserva trechoreserva_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.trechoreserva
+    ADD CONSTRAINT trechoreserva_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: trechovoo trechovoo_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.trechovoo
+    ADD CONSTRAINT trechovoo_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: voo voo_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.voo
+    ADD CONSTRAINT voo_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: trechoreserva poltronainexiste; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER poltronainexiste BEFORE INSERT OR UPDATE ON public.trechoreserva FOR EACH ROW EXECUTE PROCEDURE public.poltronainexiste();
+
+
+--
+-- Name: trechoreserva trechoreserva_reserva_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.trechoreserva
+    ADD CONSTRAINT trechoreserva_reserva_fkey FOREIGN KEY (reserva) REFERENCES public.reservas(id);
+
+
+--
+-- Name: trechoreserva trechoreserva_trechovoo_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.trechoreserva
+    ADD CONSTRAINT trechoreserva_trechovoo_fkey FOREIGN KEY (trechovoo) REFERENCES public.trechovoo(id);
+
+
+--
+-- Name: trechovoo trechovoo_aeroportodestino_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.trechovoo
+    ADD CONSTRAINT trechovoo_aeroportodestino_fkey FOREIGN KEY (aeroportodestino) REFERENCES public.aeroportos(id);
+
+
+--
+-- Name: trechovoo trechovoo_aeroportoorigem_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.trechovoo
+    ADD CONSTRAINT trechovoo_aeroportoorigem_fkey FOREIGN KEY (aeroportoorigem) REFERENCES public.aeroportos(id);
+
+
+--
+-- Name: trechovoo trechovoo_aviao_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.trechovoo
+    ADD CONSTRAINT trechovoo_aviao_fkey FOREIGN KEY (aviao) REFERENCES public.aviao(id);
+
+
+--
+-- Name: trechovoo trechovoo_voo_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.trechovoo
+    ADD CONSTRAINT trechovoo_voo_fkey FOREIGN KEY (voo) REFERENCES public.voo(id);
+
+
+--
+-- PostgreSQL database dump complete
+--
+
